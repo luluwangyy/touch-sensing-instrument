@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 Fabric Instrument</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    h1 { color: #7effa0; font-size: 1.5em; }
+    #status {
+      margin: 10px;
+      padding: 10px 20px;
+      background: #222;
+      border-radius: 8px;
+      font-size: 1em;
+    }
+    #connectBtn {
+      margin: 20px;
+      padding: 14px 32px;
+      background: #7effa0;
+      color: #111;
+      border: none;
+      border-radius: 8px;
+      font-size: 1.2em;
+      cursor: pointer;
+      font-family: monospace;
+      font-weight: bold;
+    }
+    #connectBtn:hover { background: #4ecf70; }
+    #log {
+      width: 400px;
+      height: 200px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px;
+      overflow-y: auto;
+      font-size: 0.85em;
+      color: #aaa;
+    }
+    .touch1 { color: #7effa0; }
+    .touch2 { color: #7ec8ff; }
+  </style>
+</head>
+<body>
+
+  <h1>🎵 ESP32 Fabric Instrument</h1>
+  <div id="status">状态：未连接</div>
+  <button id="connectBtn">点击连接串口</button>
+  <div id="log"></div>
+
+<script>
+  // ── Tone.js 合成器设置 ──────────────────
+  const synth1 = new Tone.Synth({
+    oscillator: { type: "sine" },
+    envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.5 }
+  }).toDestination();
+
+  const synth2 = new Tone.Synth({
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.5 }
+  }).toDestination();
+
+  const notes = ["C4", "E4", "G4", "B4", "D5"];
+
+  let port, reader, inputDone, inputStream;
+  let buffer = "";
+
+  function log(msg, cls = "") {
+    const div = document.getElementById("log");
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    div.appendChild(line);
+    div.scrollTop = div.scrollHeight;
+  }
+
+  document.getElementById("connectBtn").addEventListener("click", async () => {
+    await Tone.start(); 
+
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+
+      document.getElementById("status").textContent = "状态：已连接 ✅";
+      document.getElementById("connectBtn").textContent = "已连接";
+      document.getElementById("connectBtn").disabled = true;
+
+      log("串口已连接，等待触摸...");
+
+      const decoder = new TextDecoderStream();
+      inputDone = port.readable.pipeTo(decoder.writable);
+      inputStream = decoder.readable;
+      reader = inputStream.getReader();
+
+      readLoop();
+
+    } catch (err) {
+      document.getElementById("status").textContent = "错误：" + err.message;
+      log("连接失败: " + err.message);
+    }
+  });
+
+  // ── 读取串口数据 ─────────────────────────
+  async function readLoop() {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        reader.releaseLock();
+        break;
+      }
+      if (value) {
+        buffer += value;
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); 
+
+        for (const line of lines) {
+          processLine(line.trim());
+        }
+      }
+    }
+  } 
+
+  function processLine(line) {
+    if (!line) return;
+    log("收到: " + line);
+
+    if (line.startsWith("T1:")) {
+      const val = line.split(":")[1];
+      if (val === "OFF") {
+        synth1.triggerRelease();
+        log("copper 1 release", "touch1");
+      } else {
+        const touchVal = parseInt(val);
+      
+        const freq = mapToFreq(touchVal);
+        synth1.triggerAttack(freq);
+        log("copper 1 touch！→ " + freq.toFixed(0) + "Hz", "touch1");
+      }
+    }
+
+    if (line.startsWith("T2:")) {
+      const val = line.split(":")[1];
+      if (val === "OFF") {
+        synth2.triggerRelease();
+        log("copper 2 release", "touch2");
+      } else {
+        const touchVal = parseInt(val);
+        const freq = mapToFreq(touchVal);
+        synth2.triggerAttack(freq);
+        log("copper 2 touch！→ " + freq.toFixed(0) + "Hz", "touch2");
+      }
+    }
+  }
+
+  function mapToFreq(val) {
+    val = Math.max(0, Math.min(40, val));
+    return 800 - (val / 40) * 600;
+  }
+
+</script>
+</body>
+</html>
